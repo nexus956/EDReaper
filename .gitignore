@@ -1,0 +1,8 @@
+/target
+dist/
+targets.conf
+**/*.rs.bk
+*.pdb
+*.dmp
+*.exe
+
