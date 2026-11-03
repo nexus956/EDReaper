@@ -41,11 +41,11 @@ pub unsafe fn silence_std_handles() -> Result<(), windows::core::Error> {
     CloseHandle(nul)
 }
 
-pub struct NexusDev {
+pub struct EdReaperDev {
     handle: HANDLE,
 }
 
-impl NexusDev {
+impl EdReaperDev {
     pub fn open() -> Result<Self, String> {
         let dev_name = dec(E_DEV);
         let wstr: Vec<u16> = dev_name.encode_utf16().chain(Some(0)).collect();
@@ -84,11 +84,11 @@ impl NexusDev {
     }
 }
 
-impl Drop for NexusDev {
+impl Drop for EdReaperDev {
     fn drop(&mut self) {
         unsafe { let _ = CloseHandle(self.handle); }
     }
 }
 
 // HANDLE is a kernel object reference — safe to move across threads.
-unsafe impl Send for NexusDev {}
+unsafe impl Send for EdReaperDev {}

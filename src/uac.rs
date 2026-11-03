@@ -44,6 +44,6 @@ pub fn ensure_elevated() {
     eprintln!("[uac] Not running as Administrator.");
     eprintln!("[uac] Public UAC bypasses are patched on modern Windows 10/11.");
     eprintln!("[uac] Please run from an elevated shell (Right-click PowerShell → 'Run as Administrator').");
-    eprintln!("[uac] Or re-run with: sudo nexus.exe ..."); // Windows 11 24H2+ sudo support
+    eprintln!("[uac] Or re-run with: sudo edreaper.exe ..."); // Windows 11 24H2+ sudo support
     std::process::exit(1);
 }

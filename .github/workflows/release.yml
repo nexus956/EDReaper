@@ -25,7 +25,7 @@ jobs:
       - name: Stage release assets
         run: |
           mkdir -p dist
-          cp target/x86_64-pc-windows-gnu/release/nexus.exe dist/
+          cp target/x86_64-pc-windows-gnu/release/edreaper.exe dist/
           cp driver/MonProcessEX.sys dist/
           cp targets.example.conf dist/
           cd dist && sha256sum * > SHA256SUMS

